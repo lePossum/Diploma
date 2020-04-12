@@ -2,26 +2,22 @@ from lib import *
 
 work_dir = "../pict/"
 s = str(datetime.now())
-save_dir = '../res_' + s[8:10] + '_' + s[5:7] + '/'
+save_dir = '../res/res_' + s[8:10] + '_' + s[5:7] + '/'
 print(save_dir)
 try:
     # Create target Directory
     mkdir(save_dir)
 except FileExistsError:
-    print("Directory " , save_dir ,  " already exists")
+    o = 5
 
-filename = "low_pig_rotated.jpg"
-filename = "q.jpg"
+filename = "pl_s.jpg"
+# filename = "mb1.jpg"
 
 img = rgb2gray(plt.imread(work_dir + filename))
 c = Cepstrum(img, batch_size=256, step=0.5)
-
-q = c.make_big_image()
-plt.imsave('big_img.png', q, cmap='gray')
+c.MainProcess()
 
 if (DEBUG):
-    plt.imsave('lines_img.png', c.lines_img, cmap='gray')
-
     d = blend_images('orig_img.png', 'big_img.png')
     d.save('temp_vis.png')
     

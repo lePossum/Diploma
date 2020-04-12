@@ -5,13 +5,13 @@ import gc
 import copy
 from PIL import Image
 from matplotlib.pyplot import imshow
-from sklearn.base import BaseEstimator, ClassifierMixin
 from os import listdir, mkdir
 from os.path import isfile, join
 import math
 from datetime import datetime
 import time
 from skimage.transform import radon
+from skimage import color, data, restoration
 
 def rgb2gray(rgb):
     '''
@@ -68,7 +68,7 @@ class FunctionalMinimisation:
     '''
     def __init__(self, image, kernel, beta_list):
         self._init_image = copy.deepcopy(image)
-        self._cur_image = copy.deepcopy(image)
+        self._cur_image = FixImage(copy.deepcopy(image))
         self.kernel = copy.deepcopy(kernel)
         
         self._left_grad = 0
@@ -128,8 +128,8 @@ class FunctionalMinimisation:
 #         self._v = self._mu * self._v - beta * mult * (self._left_grad + reg_mult * self._reg_grad)
         
     def _update_image(self):
-#         self._cur_image += self._v
         self._cur_image += self._v
+        FixImage(self._cur_image)
         
     def MainProcess(self):
         for i in self._betas:
@@ -166,6 +166,11 @@ def save_img(class_elem, p='my_stuff.png', p_b='blurred.png'):
     plt.imsave(p_b, class_elem._init_image, cmap='gray')
 
 DEBUG = True
+
+def rgb2gray(rgb):
+    r, g, b = rgb[:,:,0], rgb[:,:,1], rgb[:,:,2]
+    gray = 0.299 * r + 0.5870 * g + 0.1140 * b
+    return gray
 
 def blend_images(orig, four, alpha = 0.8, colH = 10, w=1):
     orig_img = Image.open(orig).convert('RGBA')
@@ -224,12 +229,13 @@ def wiener_filter(img, kernel, K=10):
     return dummy
 
 def restore_function(img, kernel):
-    betas = [0.1/math.sqrt(i) for i in range(1, 2)]
-    if (kernel.shape[0] == 0):
-        return img
-    q = FunctionalMinimisation(img, kernel, betas)
-    q.MainProcess()
-    return q._cur_image
+    # betas = [0.001/math.sqrt(i) for i in range(1, 15)]
+    # if (kernel.shape[0] == 0):
+    #     return img
+    # q = FunctionalMinimisation(img, kernel, betas)
+    # q.MainProcess()
+    # return q._cur_image
+    return wiener_filter(img, kernel)
 
 def get_blur_len(img, angle):
     r = radon(img, theta=[angle], circle=True)
@@ -239,37 +245,45 @@ def get_blur_len(img, angle):
     for i in range(len(r)):
         if (r[i] > 0.7):
             blur_len = len(r) // 2 - 1 - i 
-#             if (blur_len > img.shape[0] // 4):
-#                 blur_len = 0
-#             break
+            if (blur_len > 2 * img.shape[0] // 5):
+                blur_len = 0
+            break
     return int(abs(blur_len))
 
-def find_best_line(template_picture, dif=30, w=1):
+def find_best_line(template_picture, dif=180, w=1):
     h = template_picture.shape[0]
     q = h // 2 - 1
     theta = np.linspace(0., 180., dif, endpoint=False)
     sinogram = radon(template_picture, theta=theta, circle=True)
     max_values = sinogram.max(axis=0)
     if (DEBUG):
-        angle = theta[np.argmax(max_values)]
+        angle = theta[np.argmax(max_values)] - 90
+        if (angle < 0):
+            angle += 180
         k = math.tan(angle)
         b = (1 - k) * q
         l = []
-        for old_x in range(h):
-            old_y = round(k * old_x+b)
-            old_y = int((old_y if old_y >= 0 else 0) if old_y <= h-1 else h-1)
-            if (old_y <= 1 or old_y >= h-2 or old_x <= 1 or old_x >= h-2):
-                continue
-            for i in range(-w, w+1):
-                for j in range(-w, w+1):
-                    x = old_x
-                    y = old_y
-                    y += i
-                    y = (y if y >= 0 else 0) if y <= h-1 else h-1
-                    x += j
-                    x = (x if x >= 0 else 0) if x <= h-1 else h-1
-                    if (y, x) not in l:
-                        l.append((y, x))
+        if (angle != 0) :
+            for old_x in range(h):
+                old_y = round(k * old_x+b)
+                old_y = int((old_y if old_y >= 0 else 0) if old_y <= h-1 else h-1)
+                if (old_y <= 1 or old_y >= h-2 or old_x <= 1 or old_x >= h-2):
+                    continue
+                for i in range(-w, w+1):
+                    for j in range(-w, w+1):
+                        x = old_x
+                        y = old_y
+                        y += i
+                        y = (y if y >= 0 else 0) if y <= h-1 else h-1
+                        x += j
+                        x = (x if x >= 0 else 0) if x <= h-1 else h-1
+                        if (y, x) not in l:
+                            l.append((y, x))
+        else:
+            for y in range(h):
+                for i in range(-w, w+1):
+                    if (y, q + i) not in l:
+                        l.append((y, q + i))
         p = np.zeros((template_picture.shape[0], template_picture.shape[0]))
         mv = max(max_values)
         for t in l:
@@ -280,15 +294,22 @@ def find_best_line(template_picture, dif=30, w=1):
 
 def make_ker(ker_len, ker_angle):
     h = ker_len * 2
-    ker = np.zeros((h, h))
+    ker = np.zeros((h, h), dtype='float')
+    ker_angle -= 90
+    if (ker_angle < 0):
+        ker_angle += 180
     k = math.tan(ker_angle)
     b = (1 - k) * ker_len
-    for x in range(h):
-        y = round(k * x + b)
-        y = int((y if y >= 0 else 0) if y <= h-1 else h-1)
-        if (y == 0 or y == h - 1):
-            continue
-        ker[y, x] = 1
+    if (ker_angle != 90):
+        for x in range(h):
+            y = round(k * x + b)
+            y = int((y if y >= 0 else 0) if y <= h-1 else h-1)
+            if (y == 0 or y == h - 1):
+                continue
+            ker[y, x] = 1
+    else:
+        for y in range(h):
+            ker[y, ker_len] = 1 
     return ker/ker.sum()
 
 def make_common_ker(kers):
@@ -302,7 +323,10 @@ def make_common_ker(kers):
         for y in range(cur_shape):
             for x in range(cur_shape):
                 new_ker[y + cur_offset, x + cur_offset] += k[y, x]
-    return new_ker/new_ker.sum()
+    return new_ker/new_ker.sum()    
+    # return new_ker
+
+
 
 class Cepstrum:
     def __init__(self, picture, batch_size=64, step=0.25):
@@ -325,56 +349,43 @@ class Cepstrum:
                 yield self.swap_quarters(Cepstrum.calculate_cepstrum(square))
 
     def ft_array(self):
-        a = np.array(list(self.get_square()))
+        # CALCULATE CEPSTRUMS
+        
+        t = time.time()
+            
+        self.count_ft()
         if (DEBUG):
-            b = np.copy(a)
-            self.new_image = np.copy(a)
-        self.weight = np.ndarray((self.y_batches * self.x_batches), dtype='float')
-        self.angle = np.ndarray((self.y_batches * self.x_batches), dtype='float')
-        self.blur_len = np.ndarray((self.y_batches * self.x_batches), dtype='int')
-        self.kernels = [0] * self.y_batches * self.x_batches
-        # MAIN CALCULATIONS PART #
-        for idx, q in enumerate(a):
-            if (DEBUG):
-                self.weight[idx], b[idx], self.angle[idx] = find_best_line(q)
-            else:
-                self.weight[idx], _, self.angle[idx] = find_best_line(q)
-            self.blur_len[idx] = get_blur_len(b[idx], self.angle[idx])
-            self.kernels[idx] = make_ker(self.blur_len[idx], self.angle[idx])
-#             self.squared_image[idx] = restore_function(self.squared_image[idx], self.kernels[idx])
-        self.output = a.reshape((self.y_batches, self.x_batches, self.batch_size, self.batch_size))
+            print("Counted cepstrums: ", time.time() - t)
+        self.count_angles()
         if (DEBUG):
-            self.lines_img = b.reshape((self.y_batches, self.x_batches, self.batch_size, self.batch_size))
+            print("Counted angles: ", time.time() - t)
+        self.count_lengths()
+        if (DEBUG):
+            print("Counted lengths: ", time.time() - t)
+        self.make_kernels()
+        if (DEBUG):
+            print("Counted kernels: ", time.time() - t)
+        
         self.weight = self.weight.reshape((self.y_batches, self.x_batches))
         self.weight /= self.weight.max()
         self.angle = self.angle.reshape((self.y_batches, self.x_batches))
         self.blur_len = self.blur_len.reshape((self.y_batches, self.x_batches))
-        if (self.blur_len.all() == 0) :
+        if (np.max(self.blur_len) == 0) :
             print("Unable to calculate blur lengths")
             return
-        self.kernels = np.reshape(self.kernels, (self.y_batches, self.x_batches))
+#         self.kernels = np.reshape(self.kernels, (self.y_batches, self.x_batches))
 #         self.squared_image = np.reshape(self.squared_image, (self.y_batches, self.x_batches, self.batch_size, self.batch_size))
-        self.restore()
+        self.restore1()
         
-    def make_big_image(self):
+    def MainProcess(self):
         self.ft_array()
         try:
-            temp = [ 0 ] * self.y_batches
-            temp1 =[ 0 ] * self.y_batches
             temp2 =[ 0 ] * self.y_squares
-            for y in range(self.y_batches):
-                temp[y] = np.hstack(self.output[y, :, :, :])
-                if (DEBUG):
-                    temp1[y] = np.hstack(self.lines_img[y, :, :, :])
             for y in range(self.y_squares):
                 temp2[y] = np.hstack(self.restored_image[y, :, :, :])
-            self.big_image = np.vstack(temp)
             self.restored_image_full = np.vstack(temp2)
-            if (DEBUG):
-                self.lines_img = np.vstack(temp1)
-            return self.big_image
-        except AttributeError:
-            print("!!! Use ft_array() function first !!!")
+        except AttributeError as error:
+            return
             
     def hamming(picture):
         hm_len = picture.shape[0]
@@ -391,18 +402,6 @@ class Cepstrum:
 #         fourier_abs *= (1.0/fourier_abs.max())
 #         fourier_abs[fourier_abs < 0.1] = 0
         return fourier_abs
-    
-    def threshold_big_image(self, threshold=0.9):
-        fourier_abs = self.big_image
-        fourier_abs *= (1.0/fourier_abs.max())
-        fourier_abs[fourier_abs > threshold] = 0
-        fourier_abs *= (1.0/fourier_abs.max())
-        fourier_abs[fourier_abs > threshold] = 0
-        
-        fourier_abs *= (1.0/fourier_abs.max())
-        fourier_abs[fourier_abs < 0.1] = 0
-        self.big_image = fourier_abs
-        return self.big_image
     
     def swap_quarters(self, picture):
         out_pict = copy.deepcopy(picture)
@@ -448,3 +447,46 @@ class Cepstrum:
                 self.restored_image[y_orig, x_orig] =\
                     restore_function(self.cut_image[y_orig, x_orig], self.new_kernels[y_orig][x_orig])
         return self.restored_image
+    
+    def restore1(self):
+        self.deb_ker = make_common_ker(self.kernels)
+        plt.imsave('common_ker.png', self.deb_ker, cmap='gray')
+        self.restored_image_full = restore_function(self.picture, self.deb_ker)
+    
+    def count_ft(self):
+        self.cepstrum_picture = np.array(list(self.get_square()))
+            
+        self.conc_cepstrum_picture = self.cepstrum_picture.reshape((self.y_batches, self.x_batches, self.batch_size, self.batch_size))
+        temp  = [ 0 ] * self.y_batches
+        for y in range(self.y_batches):
+            temp[y] = np.hstack(self.conc_cepstrum_picture[y, :, :, :])
+        self.conc_cepstrum_picture = np.vstack(temp)
+        plt.imsave('big_img.png', self.conc_cepstrum_picture, cmap='gray')
+    
+    def count_angles(self):
+        self.weight = np.ndarray((self.y_batches * self.x_batches), dtype='float')
+        self.angle = np.ndarray((self.y_batches * self.x_batches), dtype='float')
+        if (DEBUG):
+            self.lines_img = np.copy(self.cepstrum_picture)
+        for idx, q in enumerate(self.cepstrum_picture):
+            if (DEBUG):
+                self.weight[idx], self.lines_img[idx], self.angle[idx] = find_best_line(q)
+                
+                self.conc_lines_img = self.lines_img.reshape((self.y_batches, self.x_batches, self.batch_size, self.batch_size))
+                temp  = [ 0 ] * self.y_batches
+                for y in range(self.y_batches):
+                    temp[y] = np.hstack(self.conc_lines_img[y, :, :, :])
+                self.conc_lines_img = np.vstack(temp)
+                plt.imsave('lines_img.png', self.conc_lines_img, cmap='gray')
+            else:
+                self.weight[idx], _, self.angle[idx] = find_best_line(q)
+                
+    def count_lengths(self):
+        self.blur_len = np.ndarray((self.y_batches * self.x_batches), dtype='int')
+        for idx, q in enumerate(self.cepstrum_picture):
+            self.blur_len[idx] = get_blur_len(self.lines_img[idx], self.angle[idx])
+            
+    def make_kernels(self):
+        self.kernels = [0] * self.y_batches * self.x_batches
+        for idx, q in enumerate(self.cepstrum_picture):
+            self.kernels[idx] = make_ker(self.blur_len[idx], self.angle[idx])
