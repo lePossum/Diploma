@@ -90,9 +90,9 @@ def process_video(pairs, predictor, output_dir):
 
 def main(img_pattern: str,
          mask_pattern: Optional[str] = None,
-         weights_path='./pretrained_models/last_fpn_l7.h5',
+        #  weights_path='./pretrained_models/last_fpn_l11.h5',
         #  weights_path='./best_fpn.h5',
-        #  weights_path='pretrained_models/fpn_inception.h5',
+         weights_path='pretrained_models/fpn_inception.h5',
          out_dir='../Diploma/result/bn_val_6/',
          side_by_side: bool = False,
          video: bool = False):
