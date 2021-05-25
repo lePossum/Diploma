@@ -272,42 +272,54 @@ $$
 Таким образом, получается последовательность нейронных сетей, каждая из которых "специализируется" на своей длине размытия, но при этом (в силу того, что перед дообучением берётся не чистая нейронная сеть, а уже предобученная на восстановление от линейного размытия) достаточно хорошо восстанавливает в целом любые изображения, деградированные линейным размытием. 
 
 \subsubsection{Выбор модели нейронной сети}
- (?) Здесь нужен анализ актуальных методов восстановления линейного размытия?
-Или достаточно описать, мол, из трёх актуальных рассматриваемых моделей быстрее и лучше дообучалась выбранная? И насколько подробно вдаваться в архитектуру выбранной нейронной сети?
+Было проанализировано несколько актуальных статей по теме восстановления изображения после линейного размытия и рассмотрены три (\cite{dganv2, jin, srn}) 
 
-Deep Multi-scale Convolutional Neural Network for Dynamic Scene Deblurring
-DeblurGAN-v2
-Neural Blind Deconvolution Using Deep Priors 
+Были взяты архитектуры нейросетей, предложенные в статьях, с предобученными весами и дообучены с небольшим значением скорости обучения и одинаковым количеством эпох на фиксированном наборе искусственно размытых и зашумлённых изображений. После модели были протестированы на валидационной выборке, в результате чего выяснилось, что лучше восстанавливает изображения в конкретном случае модель DeblurGAN-v2 (\ref{ris:dif_nn}), поэтому я остановился на ней.
+
+% jin 0.8830790087128036
+% srn 0.9254269373900489
+% dg2 0.9259587476524342
+
+\begin{figure}[H]
+\begin{minipage}[t]{0.3\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/dif_nn_algs/jin.png}} 
+\cite{jin} SSIM: 0.8831 \\ 
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.3\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/dif_nn_algs/srn.png}} 
+\cite{srn} SSIM: 0.9254 \\ 
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.3\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/dif_nn_algs/dgan2.png}} 
+\cite{dganv2} SSIM: 0.9260 \\ 
+\end{minipage}
+\caption{ Сравнение результатов работы дообученных алгоритмов. Значение метрики SSIM с неразмытым изображением указано под каждым изображением }
+\label{ris:dif_nn}
+\end{figure}
+
+\subsubsection{ Выбранная модель нейронной сети}
+
+Подробно архитектура описана в \cite{dganv2}, кратко опишу её структуру.
+
+\begin{figure}[H]
+\begin{minipage}[h]{1\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/dgan_arch.png}}
+\end{minipage}
+\caption{ Схематичное описание процесса работы выбранной нейронной сети }
+\label{ris:dgan_arch}
+\end{figure}
+
+Авторы предлагают идею Сетей Пирамид Признаков (далее по тексту - СПП), включающие в себя несколько уровней карт признаков, которые содержат информацию, грубо говоря, с разных масштабов. СПП состоит из восходящего пути (на рисунке \ref{ris:dgan_arch} левая пирамида с синими слоями), представляющего из себя стандартную свёрточную сеть с последовательным понижением размерности. Через нисходящий путь СПП восстанавливает изображения с наиболее информативных слоёв. Боковые связи между слоями пирамид дополняют восходящие и нисходящие пути и помогают локализовать объекты.
+
+В статье предлагается использовать пять карт признаков различных масштабов, которые повышаются в размерности (upscale-слой) до 1/4 изначального изображния, после чего используются две связки из свёрточного и upscale-слоёв для получения на выходе изображения исходного размера. Также авторы, по аналогии со своими предыдущими работами, в конце к вышеописанный результат суммируют с изначальным изображением для того, чтобы получившаяся нейронная сеть специализировалась на обнаружении разницы между изображениями.
 
 \subsubsection{Устойчивость метода при неправильно определённых параметрах размытия}
 
 Необходимо отметить, что предлагаемый метод более устойчив к некорректному определению параметров размытия, чем стандартные. Для примера сравним с итеративным методом обращения свёртки, основанный на использовании функционала полной вариации. 
 
-\begin{figure}[H]
-\begin{minipage}[8]{1\linewidth}
-\center{\includegraphics[width=1\linewidth]{pics/plots/PSNR_a.png}} 
-\\ 
-\end{minipage}
-    \vfill
-\begin{minipage}[8]{1\linewidth}
-\center{\includegraphics[width=1\linewidth]{pics/plots/SSIM_a.png}} 
-\\
-\end{minipage}
-%     \vfill
-% \begin{minipage}[t]{0.45\linewidth}
-% \center{\includegraphics[width=1\linewidth]{pics/plots/PSNR_l.png}} 
-% \\ 
-% \end{minipage}
-% \hfill
-% \begin{minipage}[t]{0.45\linewidth}
-% \center{\includegraphics[width=1\linewidth]{pics/plots/SSIM_l.png}} 
-% \\
-% \end{minipage}
-\caption{ Графики качества восстановления изображений при различной ошибки определения угла направления размытия алгоритмом }
-\label{ris:plots_a}
-\end{figure}
-
-По метрикам качества изображений в случае ошибки определения угла (Рис. \ref{ris:plots_a}) лучше себя показывает метод обращения свёртки, но при его использовании возникают серьёзные графические артефакты (рингинг), чего не происходит при применении предлагаемого метода \ref{ris:Wrong_angle}
+В качестве подтверждения приведу графики, построенные следующим образом: были взяты изображения, размытые с определёнными параметрами, и к ним применены алгоритмы восстановления с параметрамм, отличающимся на определённую величину, после чего результат работы алгоритма сравнивается с изначальным неразмытым изображением. Метрики усредняются по изображениям, и эти величины отражены на графиках.
 
 \begin{figure}[H]
 \begin{minipage}[t]{0.3\linewidth}
@@ -328,15 +340,31 @@ Neural Blind Deconvolution Using Deep Priors
 \label{ris:Wrong_angle}
 \end{figure}
 
+По метрикам качества изображений в случае ошибки определения угла (Рис. \ref{ris:plots_a}) лучше себя показывает восстановление нейронной сетью во всех случаях, кроме, непосредственно, отсутствия ошибки при определении угла, но даже в этом случае у метода обращения свёртки возникают графические артефакты (рингинг), чего не происходит при применении предлагаемого метода (Рис. \ref{ris:Wrong_angle}).
+
 
 \begin{figure}[H]
-\begin{minipage}[t]{1\linewidth}
-\center{\includegraphics[width=1\linewidth]{pics/plots/PSNR_l.png}} 
+\begin{minipage}[8]{0.45\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/plots/PSNR_a.png}} 
 \\ 
 \end{minipage}
-\begin{minipage}[t]{1\linewidth}
-\center{\includegraphics[width=1\linewidth]{pics/plots/SSIM_l.png}} 
+    \hfill
+\begin{minipage}[8]{0.46\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/plots/SSIM_a.png}} 
 \\
+\end{minipage}
+
+\caption{ Графики качества восстановления изображений при различной ошибки определения угла направления размытия алгоритмом }
+\label{ris:plots_a}
+\end{figure}
+
+\begin{figure}[H]
+\begin{minipage}[t]{0.46\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/plots/PSNR_l.png}}  \\ 
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.46\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/plots/SSIM_l.png}}  \\
 \end{minipage}
 \caption{ Графики качества восстановления изображений при различной ошибке определения длины размытия алгоритмом }
 \label{ris:plots_l}
@@ -358,26 +386,29 @@ Neural Blind Deconvolution Using Deep Priors
 \center{\includegraphics[width=1\linewidth]{pics/restore_ex/nn_img_19.png}} 
 (в) Результат работы предложенного алгоритма\\ 
 \end{minipage}
-
-
 \caption{ Сравнение итеративного подхода к обращению свёртки и предложенного метода в случае отсутствия ошибки при определении параметров размытия. Важно отметить, что итеративный подход затратен по времени, в отличие от использования нейронной сети, и требует в среднем на 2 порядка больше времени}
 \label{ris:restore_comparison}
+\end{figure}
+
+\begin{figure}[H]
+\begin{minipage}[t]{0.46\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/plots/PSNR_n.png}} 
+\\ 
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.46\linewidth}
+\center{\includegraphics[width=1\linewidth]{pics/plots/SSIM_n.png}} 
+\\
+\end{minipage}
+\caption{ Графики качества восстановления изображений при различном уровне шума }
+\label{ris:plots_n}
 \end{figure}
 
 \newpage
 \section{Результаты работы алгоритма}
 
 \begin{figure}[H]
-% \begin{minipage}[t]{0.4\linewidth}
-% \center{\includegraphics[width=1\linewidth]{pics/restore_ex/b_img_12.png}} 
-% \\ 
-% \end{minipage}
-% \hfill
-% \begin{minipage}[t]{0.4\linewidth}
-% \center{\includegraphics[width=1\linewidth]{pics/restore_ex/nn_img_12.png}} 
-% \\ 
-% \end{minipage}
-%     \vfill
+
 \begin{minipage}[t]{0.45\linewidth}
 \center{\includegraphics[width=1\linewidth]{pics/restore_ex/b_img_14.png}} 
 \\ 
